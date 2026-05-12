@@ -1,0 +1,427 @@
+<!DOCTYPE html>
+<html lang="ms">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#06090f">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="CalmDrive">
+<title>CalmDrive</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{background:#06090f;color:#e2e8f0;font-family:'DM Mono','Courier New',monospace;min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;overflow:hidden}
+
+#loading{position:fixed;inset:0;background:#06090f;display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:100;transition:opacity .8s}
+#loading.hilang{opacity:0;pointer-events:none}
+.l-nama{font-size:22px;font-weight:700;color:#e2e8f0;letter-spacing:-.5px;margin-bottom:40px}
+.l-dot-wrap{display:flex;gap:8px}
+.l-dot{width:6px;height:6px;border-radius:50%;background:#1e3a5f;animation:blink 1.4s ease-in-out infinite}
+.l-dot:nth-child(2){animation-delay:.2s}
+.l-dot:nth-child(3){animation-delay:.4s}
+@keyframes blink{0%,80%,100%{opacity:.2}40%{opacity:1;background:#22c55e}}
+
+#app{width:100%;max-width:380px;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;padding:40px 24px;opacity:0;transition:opacity .6s}
+#app.masuk{opacity:1}
+
+#speed-wrap{display:flex;flex-direction:column;align-items:center;margin-bottom:32px}
+#speed-num{font-size:96px;font-weight:700;line-height:1;letter-spacing:-4px;color:#22c55e;transition:color 1s}
+#speed-unit{font-size:13px;color:#1e3a5f;letter-spacing:.2em;margin-top:4px}
+
+#mesej-wrap{background:#0c1120;border-radius:16px;padding:20px 24px;text-align:center;width:100%;margin-bottom:28px;border:1px solid transparent;transition:border-color 1s,background 1s;min-height:80px;display:flex;align-items:center;justify-content:center}
+#mesej-teks{font-size:16px;color:#475569;line-height:1.6;transition:color .8s}
+
+#titik-wrap{display:flex;gap:16px;margin-bottom:40px}
+.titik{width:12px;height:12px;border-radius:50%;background:#0c1120;border:1.5px solid #1e3a5f;transition:all 1s}
+.titik.hijau{background:#22c55e;border-color:#22c55e;box-shadow:0 0 10px #22c55e60}
+.titik.merah{background:#0c1120;border-color:#ef444430}
+
+#status{position:fixed;bottom:24px;display:flex;align-items:center;gap:8px}
+#dot-gps{width:6px;height:6px;border-radius:50%;background:#1e3a5f;transition:background .5s}
+#teks-status{font-size:10px;color:#1e3a5f}
+
+#reminder{position:fixed;top:28px;font-size:11px;color:#1e3a5f;opacity:0;transition:opacity .5s;letter-spacing:.06em}
+#reminder.tunjuk{opacity:1}
+
+/* Data quality badge — tunjuk bila data disimpan */
+#badge-data{position:fixed;bottom:48px;left:50%;transform:translateX(-50%);background:#052e16;border:1px solid #166534;border-radius:20px;padding:6px 16px;font-size:10px;color:#4ade80;opacity:0;transition:opacity .4s;white-space:nowrap}
+#badge-data.tunjuk{opacity:1}
+</style>
+</head>
+<body>
+
+<div id="loading">
+  <div class="l-nama">CalmDrive</div>
+  <div class="l-dot-wrap">
+    <div class="l-dot"></div>
+    <div class="l-dot"></div>
+    <div class="l-dot"></div>
+  </div>
+</div>
+
+<div id="reminder">km/j — masih okay</div>
+<div id="badge-data">Data lampu isyarat disimpan</div>
+
+<div id="app">
+  <div id="speed-wrap">
+    <div id="speed-num">—</div>
+    <div id="speed-unit">KM/J</div>
+  </div>
+  <div id="mesej-wrap">
+    <div id="mesej-teks">Mengesan GPS...</div>
+  </div>
+  <div id="titik-wrap">
+    <div class="titik" id="t1"></div>
+    <div class="titik" id="t2"></div>
+  </div>
+</div>
+
+<div id="status">
+  <div id="dot-gps"></div>
+  <span id="teks-status">Menunggu GPS...</span>
+</div>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-app.js";
+import { getFirestore, collection, addDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
+
+const db = getFirestore(initializeApp({
+  apiKey: "AIzaSyBnBM1Tt6v4Qaff2APnSToh8t06ku_at2s",
+  authDomain: "calmdrive-253bf.firebaseapp.com",
+  projectId: "calmdrive-253bf",
+  storageBucket: "calmdrive-253bf.firebasestorage.app",
+  messagingSenderId: "1068734754947",
+  appId: "1:1068734754947:web:546f35292f323d80dbebb6"
+}));
+
+// ── Lampu — 2 dulu ──────────────────────────────────
+let LAMPU = [
+  { id:'L1', jarak:200, kitaran:90, hijau:52, ofset:0  },
+  { id:'L2', jarak:420, kitaran:90, hijau:52, ofset:28 },
+];
+
+// ── Config ───────────────────────────────────────────
+const CFG = {
+  MARGIN:      4,    // saat hijau berbaki minimum
+  SPIKE:       20,   // max tukar laju per saat
+  BUFFER:      6,    // saiz buffer smoothing
+  GPS_LEMAH:   40,   // accuracy threshold (meter)
+  REMINDER_S:  20,   // reminder setiap 20 saat
+
+  // ── Filter data quality ──────────────────────────
+  HENTI_KMJ:   3,    // bawah ni = berhenti
+  GERAK_KMJ:   8,    // atas ni = gerak semula
+  SAH_HENTI:   4,    // saat sebelum confirm berhenti
+  HENTI_MIN:   8,    // berhenti minimum (saat) — bukan lampu kalau < ni
+  HENTI_MAX:   120,  // berhenti maksimum (saat) — makan/parking kalau > ni
+  JARAK_MIN:   40,   // mesti gerak > 40m selepas berhenti — filter traffic jam
+                     // traffic jam: berhenti → gerak 5m → berhenti semula
+                     // lampu isyarat: berhenti → gerak → terus jalan
+};
+
+// ── State ────────────────────────────────────────────
+const S = {
+  // GPS
+  buf:[], lajuPrev:null, lajuHalus:0,
+  lat:null, lon:null, lemah:true, aktif:false,
+
+  // Cadangan stabil
+  cadangan:      null,
+  situasiSemasa: null,
+  masaReminder:  0,
+
+  // Auto-belajar — dengan filter traffic jam
+  fasa: 'idle',         // idle → tunggu → henti → gerak → verify
+  masaHenti:   null,
+  latHenti:    null,
+  lonHenti:    null,
+  kiraHenti:   0,
+  jarakSelepas: 0,      // berapa meter dah gerak selepas lampu
+  latGerak:    null,    // lokasi mula gerak
+  lonGerak:    null,
+};
+
+// ── Kira jarak antara dua GPS point (meter) ──────────
+function jarakGps(lat1, lon1, lat2, lon2){
+  const R = 6371000;
+  const dLat = (lat2-lat1) * Math.PI/180;
+  const dLon = (lon2-lon1) * Math.PI/180;
+  const a = Math.sin(dLat/2)**2 +
+    Math.cos(lat1*Math.PI/180) * Math.cos(lat2*Math.PI/180) * Math.sin(dLon/2)**2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+
+// ── Kira fasa ────────────────────────────────────────
+function bakiH(l, eta=0){
+  const pos = Math.floor(l.ofset + eta) % l.kitaran;
+  return pos < l.hijau ? l.hijau - pos : 0;
+}
+function fasaSkrg(l){
+  const pos = Math.floor(l.ofset) % l.kitaran;
+  if(pos < l.hijau)     return 'hijau';
+  if(pos < l.hijau + 5) return 'kuning';
+  return 'merah';
+}
+
+// ── Cari kelajuan optimum ────────────────────────────
+function cariOptimum(had=70){
+  let best=null, top=-1;
+  for(let s=20; s<=had; s++){
+    let bil=0;
+    for(const l of LAMPU){
+      if(bakiH(l, l.jarak/(s/3.6)) >= CFG.MARGIN) bil++;
+    }
+    const sc = bil*1000 + s;
+    if(sc > top){ top=sc; best={s, bil}; }
+  }
+  return top >= 1000 ? best : null;
+}
+
+// ── Tunjuk badge data ─────────────────────────────────
+function tunjukBadge(msg){
+  const b = document.getElementById('badge-data');
+  b.textContent = msg;
+  b.classList.add('tunjuk');
+  setTimeout(()=>b.classList.remove('tunjuk'), 3000);
+}
+
+// ── Simpan ke Firebase ────────────────────────────────
+async function simpanData(lat, lon, lama, jarak){
+  // Double-check filter sebelum simpan
+  if(lama < CFG.HENTI_MIN || lama > CFG.HENTI_MAX) return;
+  if(jarak < CFG.JARAK_MIN) return; // traffic jam — abaikan
+
+  try{
+    await addDoc(collection(db,'pemerhatian'),{
+      lat, lon,
+      lamaHenti:    lama,
+      jarakSelepas: Math.round(jarak),
+      masa:         serverTimestamp(),
+      versi:        '2.0',
+      jenisData:    'lampu_isyarat', // bukan traffic jam
+    });
+    tunjukBadge(`Data disimpan — ${lama}s berhenti, ${Math.round(jarak)}m gerak`);
+  }catch(_){
+    tunjukBadge(`Disimpan (offline) — sync bila ada internet`);
+  }
+
+  // Backup local
+  const d = JSON.parse(localStorage.getItem('cd_obs')||'[]');
+  d.push({lat, lon, lamaHenti:lama, jarakSelepas:Math.round(jarak), masa:new Date().toISOString()});
+  if(d.length > 300) d.splice(0, d.length-300);
+  localStorage.setItem('cd_obs', JSON.stringify(d));
+  document.getElementById('teks-status').textContent =
+    `GPS baik • ${d.length} data dikumpul`;
+}
+
+// ── Auto-belajar dengan filter traffic jam ────────────
+//
+// State machine:
+//   idle  → detect berhenti
+//   henti → confirm berhenti (4 saat berturut)
+//   gerak → ukur berapa jauh gerak selepas lampu
+//   verify→ kalau > 40m, ini lampu isyarat sebenar → simpan
+//           kalau < 40m, traffic jam → buang
+//
+function autoBelajar(laju, lat, lon){
+  if(S.lemah) return;
+
+  switch(S.fasa){
+
+    case 'idle':
+      if(laju < CFG.HENTI_KMJ){
+        S.kiraHenti++;
+        if(S.kiraHenti >= CFG.SAH_HENTI){
+          // Confirm berhenti
+          S.fasa     = 'henti';
+          S.masaHenti = Date.now() - (CFG.SAH_HENTI * 1000);
+          S.latHenti  = lat;
+          S.lonHenti  = lon;
+          S.kiraHenti = 0;
+        }
+      } else {
+        S.kiraHenti = 0;
+      }
+      break;
+
+    case 'henti':
+      if(laju > CFG.GERAK_KMJ){
+        // Mula gerak — rekod lokasi mula gerak
+        S.fasa     = 'gerak';
+        S.latGerak  = lat;
+        S.lonGerak  = lon;
+        S.jarakSelepas = 0;
+      }
+      // Kalau berhenti > 2 minit, kemungkinan makan/parking
+      const lamaHenti = (Date.now() - S.masaHenti) / 1000;
+      if(lamaHenti > CFG.HENTI_MAX){
+        S.fasa = 'idle'; // reset, bukan lampu isyarat
+      }
+      break;
+
+    case 'gerak':
+      // Ukur jarak dari titik mula gerak
+      if(S.latGerak && S.lonGerak){
+        S.jarakSelepas = jarakGps(S.latGerak, S.lonGerak, lat, lon);
+      }
+
+      if(laju < CFG.HENTI_KMJ){
+        // Berhenti semula sebelum 40m — traffic jam!
+        if(S.jarakSelepas < CFG.JARAK_MIN){
+          // Buang data ini, mula semula dari titik berhenti baru
+          S.fasa     = 'henti';
+          S.masaHenti = Date.now();
+          S.latHenti  = lat;
+          S.lonHenti  = lon;
+          S.jarakSelepas = 0;
+        } else {
+          // Dah gerak > 40m, berhenti lagi — data valid
+          // Tapi ini mungkin lampu isyarat seterusnya
+          // Simpan data lampu pertama dulu
+          _simpanDanReset(lat, lon);
+        }
+      } else if(S.jarakSelepas >= CFG.JARAK_MIN){
+        // Gerak > 40m dengan konsisten — confirm lampu isyarat
+        _simpanDanReset(lat, lon);
+      }
+      break;
+  }
+}
+
+function _simpanDanReset(lat, lon){
+  const lama = Math.round((Date.now() - S.masaHenti) / 1000);
+  simpanData(S.latHenti, S.lonHenti, lama, S.jarakSelepas);
+  // Reset untuk detect lampu seterusnya
+  S.fasa         = 'idle';
+  S.masaHenti    = null;
+  S.latHenti     = null;
+  S.lonHenti     = null;
+  S.latGerak     = null;
+  S.lonGerak     = null;
+  S.jarakSelepas = 0;
+  S.kiraHenti    = 0;
+}
+
+// ── Kemas UI ─────────────────────────────────────────
+function kemasUI(){
+  if(!S.aktif) return;
+
+  const opt     = cariOptimum();
+  const bilH    = opt ? opt.bil : 0;
+  const lajuOpt = opt ? opt.s : null;
+  const fsDepan = fasaSkrg(LAMPU[0]);
+
+  let mesej, warna, kodBaru;
+
+  if(fsDepan === 'merah'){
+    kodBaru = 'MERAH';
+    warna   = '#ef4444';
+    mesej   = 'Lampu depan merah — berhenti';
+  } else if(fsDepan === 'kuning'){
+    kodBaru = 'KUNING';
+    warna   = '#f59e0b';
+    mesej   = 'Lampu depan nak merah — bersedia';
+  } else if(!opt){
+    kodBaru = 'TIADA';
+    warna   = '#475569';
+    mesej   = 'Pandu seperti biasa';
+  } else {
+    kodBaru = `HIJAU_${bilH}_${lajuOpt}`;
+    warna   = '#22c55e';
+    mesej   = `Pada ${lajuOpt} km/j — ${bilH} lampu hijau di hadapan`;
+  }
+
+  // Hanya update UI bila situasi betul-betul berubah
+  if(kodBaru !== S.situasiSemasa){
+    S.situasiSemasa = kodBaru;
+    S.cadangan      = lajuOpt;
+    S.masaReminder  = Date.now();
+
+    document.getElementById('speed-num').textContent = lajuOpt || '—';
+    document.getElementById('speed-num').style.color = warna;
+    document.getElementById('mesej-teks').textContent = mesej;
+    document.getElementById('mesej-teks').style.color = warna;
+    document.getElementById('mesej-wrap').style.borderColor = warna+'30';
+    document.getElementById('mesej-wrap').style.background =
+      warna==='#22c55e' ? '#052e16' :
+      warna==='#f59e0b' ? '#1c1200' :
+      warna==='#ef4444' ? '#1a0505' : '#0c1120';
+
+    document.getElementById('reminder').classList.remove('tunjuk');
+  }
+
+  // Reminder setiap 20 saat
+  if(kodBaru && kodBaru.startsWith('HIJAU')){
+    const berlalu = (Date.now() - S.masaReminder) / 1000;
+    if(berlalu >= CFG.REMINDER_S){
+      S.masaReminder = Date.now();
+      const r = document.getElementById('reminder');
+      r.textContent = `${lajuOpt} km/j — masih okay`;
+      r.classList.add('tunjuk');
+      setTimeout(()=>r.classList.remove('tunjuk'), 3000);
+    }
+  }
+
+  // Titik lampu
+  LAMPU.forEach((l, i) => {
+    const eta = l.jarak / ((lajuOpt || Math.round(S.lajuHalus)) / 3.6);
+    const ok  = bakiH(l, eta) >= CFG.MARGIN;
+    const el  = document.getElementById(`t${i+1}`);
+    if(el) el.className = 'titik ' + (ok ? 'hijau' : 'merah');
+  });
+}
+
+// ── GPS ──────────────────────────────────────────────
+function prosesGps(pos){
+  const lajuM = Math.max(0, pos.coords.speed||0) * 3.6;
+  let laju = lajuM;
+  if(S.lajuPrev !== null && Math.abs(lajuM-S.lajuPrev) > CFG.SPIKE)
+    laju = S.lajuPrev;
+  S.lajuPrev  = laju;
+  S.buf.push(laju);
+  if(S.buf.length > CFG.BUFFER) S.buf.shift();
+  S.lajuHalus = S.buf.reduce((a,b)=>a+b,0) / S.buf.length;
+  S.lat   = pos.coords.latitude;
+  S.lon   = pos.coords.longitude;
+  S.lemah = pos.coords.accuracy > CFG.GPS_LEMAH;
+  S.aktif = true;
+
+  const dot = document.getElementById('dot-gps');
+  dot.style.background = S.lemah ? '#f59e0b' : '#22c55e';
+  document.getElementById('teks-status').textContent =
+    S.lemah ? 'GPS lemah' : `GPS baik • ${Math.round(S.lajuHalus)} km/j`;
+
+  autoBelajar(S.lajuHalus, S.lat, S.lon);
+}
+
+function mulaGps(){
+  if(!('geolocation' in navigator)){
+    document.getElementById('mesej-teks').textContent='GPS tidak disokong. Cuba Chrome.';
+    return;
+  }
+  navigator.geolocation.watchPosition(prosesGps,(err)=>{
+    document.getElementById('mesej-teks').textContent=
+      err.code===1?'Benarkan akses lokasi dan reload':'GPS tidak dapat diakses';
+    document.getElementById('dot-gps').style.background='#ef4444';
+  },{enableHighAccuracy:true, timeout:10000, maximumAge:0});
+}
+
+// ── Tick setiap saat ──────────────────────────────────
+setInterval(()=>{
+  LAMPU = LAMPU.map(l=>({...l, ofset:(l.ofset+1)%l.kitaran}));
+  kemasUI();
+},1000);
+
+// ── Loading ───────────────────────────────────────────
+setTimeout(()=>{ mulaGps(); }, 800);
+setTimeout(()=>{
+  document.getElementById('loading').classList.add('hilang');
+  setTimeout(()=>{
+    document.getElementById('loading').style.display='none';
+    document.getElementById('app').classList.add('masuk');
+  },800);
+},2500);
+</script>
+</body>
+</html>
